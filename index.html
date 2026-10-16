@@ -1,0 +1,485 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>DNA Sequence Alignment Puzzle</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+  body { font-family: 'Courier New', monospace; }
+  .base { display:inline-flex; align-items:center; justify-content:center; width:28px; height:28px; border-radius:4px; font-size:14px; font-weight:700; cursor:pointer; user-select:none; transition: all 0.15s; border:1px solid transparent; }
+  .base-A { background:#1a3a1a; color:#4ade80; }
+  .base-T { background:#3a1a1a; color:#f87171; }
+  .base-G { background:#1a2a3a; color:#60a5fa; }
+  .base-C { background:#2a1a3a; color:#c084fc; }
+  .base-gap { background:#1a1a1a; color:#6b7280; border:1px dashed #4b5563; }
+  .base-match { border:1px solid #22c55e !important; box-shadow:0 0 6px rgba(34,197,94,0.4); }
+  .base-mismatch { border:1px solid #ef4444 !important; box-shadow:0 0 6px rgba(239,68,68,0.3); }
+  .base-gap-penalty { border:1px solid #6b7280 !important; }
+  .base:hover { transform:scale(1.1); }
+  .seq-row { display:flex; gap:2px; align-items:center; flex-wrap:wrap; }
+  .dp-cell { width:32px; height:28px; display:inline-flex; align-items:center; justify-content:center; font-size:11px; border:1px solid #374151; }
+  .dp-cell-highlight { background:#1e3a5f !important; color:#60a5fa; }
+  .dp-cell-path { background:#1a3a1a !important; color:#4ade80; }
+  .tab-active { background:#1d4ed8; color:#fff; }
+  .tab-inactive { background:#1f2937; color:#9ca3af; }
+  @keyframes pop { 0%{transform:scale(1)} 50%{transform:scale(1.2)} 100%{transform:scale(1)} }
+  .pop { animation: pop 0.2s ease; }
+</style>
+</head>
+<body class="bg-gray-900 text-gray-100 min-h-screen">
+<div class="max-w-3xl mx-auto p-4">
+
+  <div class="text-center mb-5">
+    <h1 class="text-3xl font-bold text-blue-400 mb-1">DNA Alignment Puzzle</h1>
+    <p class="text-gray-400 text-sm">Insert gaps to maximize alignment score between two DNA sequences</p>
+  </div>
+
+  <!-- Score panel -->
+  <div class="flex gap-3 justify-center mb-5 flex-wrap text-sm">
+    <div class="bg-gray-800 rounded-lg px-4 py-2 text-center">
+      <div class="text-white font-bold text-lg" id="cur-score">0</div>
+      <div class="text-gray-500 text-xs">Your Score</div>
+    </div>
+    <div class="bg-gray-800 rounded-lg px-4 py-2 text-center">
+      <div class="text-green-400 font-bold text-lg" id="opt-score">—</div>
+      <div class="text-gray-500 text-xs">Optimal (NW)</div>
+    </div>
+    <div class="bg-gray-800 rounded-lg px-4 py-2 text-center">
+      <div class="text-yellow-400 font-bold" id="stat-streak">0</div>
+      <div class="text-gray-500 text-xs">Streak</div>
+    </div>
+    <div class="bg-gray-800 rounded-lg px-4 py-2 text-center">
+      <div class="text-cyan-400 font-bold" id="stat-solved">0</div>
+      <div class="text-gray-500 text-xs">Solved</div>
+    </div>
+  </div>
+
+  <!-- Scoring legend -->
+  <div class="flex gap-3 mb-4 justify-center text-xs text-gray-400 flex-wrap">
+    <span class="flex items-center gap-1"><span class="base base-A">A</span> Match +2</span>
+    <span class="flex items-center gap-1"><span class="base base-A base-mismatch">T</span> Mismatch −1</span>
+    <span class="flex items-center gap-1"><span class="base base-gap">−</span> Gap −2</span>
+  </div>
+
+  <!-- Tabs -->
+  <div class="flex gap-2 mb-4 justify-center">
+    <button onclick="setPuzzle(currentIdx-1)" id="btn-prev" class="tab-btn rounded-full px-4 py-1.5 text-sm font-semibold transition-all tab-inactive" aria-label="Previous puzzle">← Prev</button>
+    <span id="puzzle-label" class="rounded-full px-4 py-1.5 text-sm font-semibold bg-gray-700 text-white">Puzzle 1/10</span>
+    <button onclick="setPuzzle(currentIdx+1)" id="btn-next" class="tab-btn rounded-full px-4 py-1.5 text-sm font-semibold transition-all tab-inactive" aria-label="Next puzzle">Next →</button>
+  </div>
+
+  <!-- Puzzle area -->
+  <div class="bg-gray-800 rounded-2xl p-5 mb-4">
+    <p id="puzzle-desc" class="text-gray-400 text-sm mb-4 italic"></p>
+
+    <!-- Seq 1 -->
+    <div class="mb-3">
+      <div class="flex items-center gap-2 mb-1">
+        <span class="text-xs text-gray-400 w-12">Seq 1:</span>
+        <button onclick="addGap(0,-1)" class="text-xs bg-gray-700 hover:bg-gray-600 rounded px-2 py-1 transition-colors" aria-label="Add gap at start of sequence 1">+ gap start</button>
+      </div>
+      <div id="seq1-display" class="seq-row min-h-[32px] bg-gray-900 rounded-lg p-2"></div>
+    </div>
+
+    <!-- Match row -->
+    <div class="mb-3">
+      <span class="text-xs text-gray-400 w-12 inline-block">Match:</span>
+      <div id="match-display" class="seq-row min-h-[24px] bg-gray-900 rounded-lg p-2"></div>
+    </div>
+
+    <!-- Seq 2 -->
+    <div class="mb-4">
+      <div class="flex items-center gap-2 mb-1">
+        <span class="text-xs text-gray-400 w-12">Seq 2:</span>
+        <button onclick="addGap(1,-1)" class="text-xs bg-gray-700 hover:bg-gray-600 rounded px-2 py-1 transition-colors" aria-label="Add gap at start of sequence 2">+ gap start</button>
+      </div>
+      <div id="seq2-display" class="seq-row min-h-[32px] bg-gray-900 rounded-lg p-2"></div>
+    </div>
+
+    <!-- Controls -->
+    <div class="flex flex-wrap gap-2">
+      <button onclick="solveNW()" class="bg-blue-700 hover:bg-blue-600 rounded-lg px-4 py-2 text-sm font-semibold transition-colors" aria-label="Show optimal Needleman-Wunsch alignment">Solve (NW Global)</button>
+      <button onclick="solveSW()" class="bg-purple-700 hover:bg-purple-600 rounded-lg px-4 py-2 text-sm font-semibold transition-colors" aria-label="Show Smith-Waterman local alignment">Smith-Waterman (Local)</button>
+      <button onclick="showHint()" class="bg-yellow-700 hover:bg-yellow-600 rounded-lg px-4 py-2 text-sm font-semibold transition-colors" aria-label="Show alignment hint">Hint 💡</button>
+      <button onclick="resetCurrent()" class="bg-gray-700 hover:bg-gray-600 rounded-lg px-4 py-2 text-sm font-semibold transition-colors" aria-label="Reset alignment">Reset</button>
+      <button onclick="toggleDP()" class="bg-gray-700 hover:bg-gray-600 rounded-lg px-4 py-2 text-sm font-semibold transition-colors" aria-label="Toggle DP table">DP Table</button>
+    </div>
+  </div>
+
+  <!-- Feedback -->
+  <div id="feedback" class="hidden bg-gray-800 rounded-2xl p-4 mb-4"></div>
+
+  <!-- DP Table -->
+  <div id="dp-panel" class="hidden bg-gray-800 rounded-2xl p-5 mb-4">
+    <h2 class="text-blue-400 font-bold mb-2 text-sm">Needleman-Wunsch DP Table</h2>
+    <p class="text-gray-500 text-xs mb-3">Blue = highest score path. Each cell = best score to align seq1[0..i] with seq2[0..j].</p>
+    <div class="overflow-x-auto">
+      <div id="dp-table" class="text-center"></div>
+    </div>
+  </div>
+
+  <!-- Solution display -->
+  <div id="solution-panel" class="hidden bg-gray-800 rounded-2xl p-5">
+    <h2 id="sol-title" class="text-blue-400 font-bold mb-3 text-sm"></h2>
+    <div id="sol-seq1" class="seq-row mb-1 flex-wrap"></div>
+    <div id="sol-match" class="seq-row mb-1 flex-wrap"></div>
+    <div id="sol-seq2" class="seq-row mb-1 flex-wrap"></div>
+    <p id="sol-score" class="text-sm text-green-400 mt-2"></p>
+  </div>
+</div>
+
+<script>
+const PUZZLES = [
+  { desc:'Short intro: align two 10-base sequences.', s1:'ACGTACGTAC', s2:'ACGAACGTAC' },
+  { desc:'A single insertion shifts everything.', s1:'ATCGATCG', s2:'ATCAGATCG' },
+  { desc:'Deletion in sequence 2.', s1:'GATTACA', s2:'GATACA' },
+  { desc:'Multiple mismatches spread across.', s1:'AAACCCGGG', s2:'AAAGCCTGG' },
+  { desc:'One sequence is longer — find where to add gaps.', s1:'ATGATG', s2:'ATCGATCG' },
+  { desc:'Palindromic-like sequences.', s1:'AACTTGAA', s2:'TTGAACTT' },
+  { desc:'Medium difficulty: 12-base alignment.', s1:'ACGTACGTACGT', s2:'ACGACGTACGTT' },
+  { desc:'Multiple gaps needed in both sequences.', s1:'TACGGATC', s2:'TACCGATCC' },
+  { desc:'Hard: subtle alignment with 3 mismatches.', s1:'GCATGCATGCAT', s2:'GCAATGCATCAT' },
+  { desc:'Hard: 14-base alignment challenge.', s1:'AAATTTCCCGGG', s2:'AAACTTCCCGTG' },
+];
+
+const MATCH=2, MISMATCH=-1, GAP=-2;
+
+let currentIdx = 0;
+let alignedSeqs = [[],[]]; // arrays of chars (letters or '-')
+let dpShown = false;
+let stats = { streak:0, solved:0 };
+let solvedSet = new Set();
+
+function loadStats() {
+  try {
+    const s = JSON.parse(localStorage.getItem('dna-align-stats') || '{}');
+    stats = { streak:s.streak||0, solved:s.solved||0 };
+    currentIdx = s.lastPuzzle || 0;
+    solvedSet = new Set(s.solved_ids || []);
+  } catch(e) {}
+  document.getElementById('stat-streak').textContent = stats.streak;
+  document.getElementById('stat-solved').textContent = stats.solved;
+}
+
+function saveStats() {
+  localStorage.setItem('dna-align-stats', JSON.stringify({
+    streak: stats.streak, solved: stats.solved,
+    lastPuzzle: currentIdx, solved_ids: [...solvedSet]
+  }));
+}
+
+function setPuzzle(idx) {
+  if (idx < 0 || idx >= PUZZLES.length) return;
+  currentIdx = idx;
+  resetCurrent();
+  saveStats();
+}
+
+function resetCurrent() {
+  const p = PUZZLES[currentIdx];
+  alignedSeqs = [p.s1.split(''), p.s2.split('')];
+  dpShown = false;
+  document.getElementById('dp-panel').className = 'hidden bg-gray-800 rounded-2xl p-5 mb-4';
+  document.getElementById('solution-panel').className = 'hidden bg-gray-800 rounded-2xl p-5';
+  document.getElementById('feedback').className = 'hidden bg-gray-800 rounded-2xl p-4 mb-4';
+  renderAll();
+}
+
+function renderAll() {
+  const p = PUZZLES[currentIdx];
+  document.getElementById('puzzle-label').textContent = `Puzzle ${currentIdx+1}/${PUZZLES.length}`;
+  document.getElementById('puzzle-desc').textContent = p.desc + ` (Original: ${p.s1} vs ${p.s2})`;
+  document.getElementById('btn-prev').disabled = currentIdx === 0;
+  document.getElementById('btn-next').disabled = currentIdx === PUZZLES.length-1;
+
+  renderSeq(0, 'seq1-display');
+  renderSeq(1, 'seq2-display');
+  renderMatchRow();
+  updateScore();
+  if (dpShown) renderDPTable();
+}
+
+function renderSeq(seqIdx, containerId) {
+  const el = document.getElementById(containerId);
+  el.innerHTML = '';
+  const seq = alignedSeqs[seqIdx];
+  seq.forEach((ch, i) => {
+    if (ch !== '-') {
+      // Add gap button before this base
+      const gapBtn = document.createElement('button');
+      gapBtn.className = 'text-gray-600 hover:text-cyan-400 text-xs w-3 h-7 flex items-center justify-center transition-colors';
+      gapBtn.textContent = '+';
+      gapBtn.title = 'Insert gap before position ' + i;
+      gapBtn.setAttribute('aria-label', `Insert gap before position ${i} in sequence ${seqIdx+1}`);
+      gapBtn.onclick = () => addGap(seqIdx, i);
+      el.appendChild(gapBtn);
+    }
+    const base = document.createElement('span');
+    if (ch === '-') {
+      base.className = 'base base-gap cursor-pointer';
+      base.textContent = '−';
+      base.title = 'Click to remove gap';
+      base.setAttribute('aria-label', 'Remove gap');
+      base.onclick = () => removeGap(seqIdx, i);
+    } else {
+      base.className = `base base-${ch}`;
+      base.textContent = ch;
+    }
+    el.appendChild(base);
+  });
+  // Final gap button
+  const lastBtn = document.createElement('button');
+  lastBtn.className = 'text-gray-600 hover:text-cyan-400 text-xs w-3 h-7 flex items-center justify-center transition-colors';
+  lastBtn.textContent = '+';
+  lastBtn.title = 'Append gap at end';
+  lastBtn.setAttribute('aria-label', `Append gap at end of sequence ${seqIdx+1}`);
+  lastBtn.onclick = () => addGap(seqIdx, seq.length);
+  el.appendChild(lastBtn);
+}
+
+function renderMatchRow() {
+  const el = document.getElementById('match-display');
+  el.innerHTML = '';
+  const len = Math.max(alignedSeqs[0].length, alignedSeqs[1].length);
+  const s1 = alignedSeqs[0].concat(Array(Math.max(0,len-alignedSeqs[0].length)).fill('-'));
+  const s2 = alignedSeqs[1].concat(Array(Math.max(0,len-alignedSeqs[1].length)).fill('-'));
+  for (let i = 0; i < len; i++) {
+    const span = document.createElement('span');
+    span.style.width = '28px';
+    span.style.display = 'inline-flex';
+    span.style.justifyContent = 'center';
+    span.style.fontSize = '12px';
+    if (s1[i] !== '-' && s2[i] !== '-') {
+      span.textContent = s1[i] === s2[i] ? '|' : '✗';
+      span.style.color = s1[i] === s2[i] ? '#22c55e' : '#ef4444';
+    } else {
+      span.textContent = ' ';
+    }
+    el.appendChild(span);
+  }
+}
+
+function scoreAlignment(a1, a2) {
+  const len = Math.max(a1.length, a2.length);
+  const s1 = a1.concat(Array(Math.max(0,len-a1.length)).fill('-'));
+  const s2 = a2.concat(Array(Math.max(0,len-a2.length)).fill('-'));
+  let score = 0;
+  for (let i = 0; i < len; i++) {
+    if (s1[i] === '-' || s2[i] === '-') score += GAP;
+    else if (s1[i] === s2[i]) score += MATCH;
+    else score += MISMATCH;
+  }
+  return score;
+}
+
+function updateScore() {
+  const sc = scoreAlignment(alignedSeqs[0], alignedSeqs[1]);
+  const el = document.getElementById('cur-score');
+  el.textContent = sc;
+  el.className = sc >= 0 ? 'text-green-400 font-bold text-lg' : 'text-red-400 font-bold text-lg';
+
+  // Compare to optimal
+  const opt = document.getElementById('opt-score');
+  if (opt.textContent !== '—') {
+    const optVal = parseInt(opt.textContent);
+    if (sc >= optVal) {
+      showFeedback('success', `Optimal score reached: ${sc}! Well done! 🎉`);
+      if (!solvedSet.has(currentIdx)) {
+        solvedSet.add(currentIdx);
+        stats.solved++;
+        stats.streak++;
+        document.getElementById('stat-streak').textContent = stats.streak;
+        document.getElementById('stat-solved').textContent = stats.solved;
+        saveStats();
+      }
+    }
+  }
+}
+
+function addGap(seqIdx, pos) {
+  const seq = alignedSeqs[seqIdx];
+  if (pos < 0) alignedSeqs[seqIdx] = ['-', ...seq];
+  else alignedSeqs[seqIdx] = [...seq.slice(0,pos), '-', ...seq.slice(pos)];
+  renderAll();
+}
+
+function removeGap(seqIdx, pos) {
+  if (alignedSeqs[seqIdx][pos] === '-') {
+    alignedSeqs[seqIdx].splice(pos, 1);
+    renderAll();
+  }
+}
+
+// Needleman-Wunsch global alignment
+function needlemanWunsch(s1, s2) {
+  const n = s1.length, m = s2.length;
+  const dp = Array.from({length:n+1}, () => new Array(m+1).fill(0));
+  const ptr = Array.from({length:n+1}, () => new Array(m+1).fill(''));
+  for (let i=1;i<=n;i++) { dp[i][0] = i*GAP; ptr[i][0]='U'; }
+  for (let j=1;j<=m;j++) { dp[0][j] = j*GAP; ptr[0][j]='L'; }
+  for (let i=1;i<=n;i++) for (let j=1;j<=m;j++) {
+    const diag = dp[i-1][j-1] + (s1[i-1]===s2[j-1] ? MATCH : MISMATCH);
+    const up = dp[i-1][j] + GAP;
+    const left = dp[i][j-1] + GAP;
+    const best = Math.max(diag, up, left);
+    dp[i][j] = best;
+    ptr[i][j] = best===diag ? 'D' : best===up ? 'U' : 'L';
+  }
+  // Traceback
+  let a1='', a2='', i=n, j=m;
+  while (i>0 || j>0) {
+    if (i>0 && j>0 && ptr[i][j]==='D') { a1=s1[i-1]+a1; a2=s2[j-1]+a2; i--;j--; }
+    else if (i>0 && ptr[i][j]==='U') { a1=s1[i-1]+a1; a2='-'+a2; i--; }
+    else { a1='-'+a1; a2=s2[j-1]+a2; j--; }
+  }
+  return { a1:a1.split(''), a2:a2.split(''), score:dp[n][m], dp, ptr };
+}
+
+// Smith-Waterman local alignment
+function smithWaterman(s1, s2) {
+  const n = s1.length, m = s2.length;
+  const dp = Array.from({length:n+1}, () => new Array(m+1).fill(0));
+  const ptr = Array.from({length:n+1}, () => new Array(m+1).fill(''));
+  let maxScore = 0, maxI = 0, maxJ = 0;
+  for (let i=1;i<=n;i++) for (let j=1;j<=m;j++) {
+    const diag = dp[i-1][j-1] + (s1[i-1]===s2[j-1] ? MATCH : MISMATCH);
+    const up = dp[i-1][j] + GAP;
+    const left = dp[i][j-1] + GAP;
+    const best = Math.max(0, diag, up, left);
+    dp[i][j] = best;
+    if (best===diag && diag>0) ptr[i][j]='D';
+    else if (best===up && up>0) ptr[i][j]='U';
+    else if (best===left && left>0) ptr[i][j]='L';
+    if (best > maxScore) { maxScore=best; maxI=i; maxJ=j; }
+  }
+  // Traceback
+  let a1='', a2='', i=maxI, j=maxJ;
+  while (i>0 && j>0 && dp[i][j]>0) {
+    if (ptr[i][j]==='D') { a1=s1[i-1]+a1; a2=s2[j-1]+a2; i--;j--; }
+    else if (ptr[i][j]==='U') { a1=s1[i-1]+a1; a2='-'+a2; i--; }
+    else { a1='-'+a1; a2=s2[j-1]+a2; j--; }
+  }
+  return { a1:a1.split(''), a2:a2.split(''), score:maxScore };
+}
+
+function solveNW() {
+  const p = PUZZLES[currentIdx];
+  const result = needlemanWunsch(p.s1, p.s2);
+  document.getElementById('opt-score').textContent = result.score;
+  showAlignmentSolution('Optimal Global Alignment (Needleman-Wunsch)', result.a1, result.a2, result.score);
+}
+
+function solveSW() {
+  const p = PUZZLES[currentIdx];
+  const result = smithWaterman(p.s1, p.s2);
+  showAlignmentSolution('Best Local Alignment (Smith-Waterman)', result.a1, result.a2, result.score);
+}
+
+function showAlignmentSolution(title, a1, a2, score) {
+  const panel = document.getElementById('solution-panel');
+  panel.className = 'bg-gray-800 rounded-2xl p-5';
+  document.getElementById('sol-title').textContent = title;
+  renderSeqInEl(a1, a2, 'sol-seq1', 'sol-seq2', 'sol-match');
+  document.getElementById('sol-score').textContent = `Score: ${score}`;
+}
+
+function renderSeqInEl(a1, a2, id1, id2, idm) {
+  const len = Math.max(a1.length, a2.length);
+  const s1 = a1.concat(Array(Math.max(0,len-a1.length)).fill('-'));
+  const s2 = a2.concat(Array(Math.max(0,len-a2.length)).fill('-'));
+
+  const el1 = document.getElementById(id1);
+  const el2 = document.getElementById(id2);
+  const elm = document.getElementById(idm);
+  el1.innerHTML = ''; el2.innerHTML = ''; elm.innerHTML = '';
+
+  for (let i = 0; i < len; i++) {
+    const isMatch = s1[i] !== '-' && s2[i] !== '-' && s1[i] === s2[i];
+    const isMismatch = s1[i] !== '-' && s2[i] !== '-' && s1[i] !== s2[i];
+
+    const b1 = document.createElement('span');
+    b1.className = `base ${s1[i]==='-'?'base-gap':`base-${s1[i]}`} ${isMatch?'base-match':isMismatch?'base-mismatch':''}`;
+    b1.textContent = s1[i] === '-' ? '−' : s1[i];
+    el1.appendChild(b1);
+
+    const bm = document.createElement('span');
+    bm.style.cssText = 'width:28px;display:inline-flex;justify-content:center;font-size:12px;';
+    bm.textContent = isMatch ? '|' : isMismatch ? '✗' : ' ';
+    bm.style.color = isMatch ? '#22c55e' : '#ef4444';
+    elm.appendChild(bm);
+
+    const b2 = document.createElement('span');
+    b2.className = `base ${s2[i]==='-'?'base-gap':`base-${s2[i]}`} ${isMatch?'base-match':isMismatch?'base-mismatch':''}`;
+    b2.textContent = s2[i] === '-' ? '−' : s2[i];
+    el2.appendChild(b2);
+  }
+}
+
+function showHint() {
+  const p = PUZZLES[currentIdx];
+  const nw = needlemanWunsch(p.s1, p.s2);
+  document.getElementById('opt-score').textContent = nw.score;
+  const gapCount1 = nw.a1.filter(c=>c==='-').length;
+  const gapCount2 = nw.a2.filter(c=>c==='-').length;
+  const curScore = scoreAlignment(alignedSeqs[0], alignedSeqs[1]);
+  showFeedback('hint', `Hint: Optimal NW score is ${nw.score} (your current: ${curScore}). Optimal alignment needs ${gapCount1} gap(s) in Seq1 and ${gapCount2} gap(s) in Seq2. Match=+2 Mismatch=−1 Gap=−2.`);
+}
+
+function toggleDP() {
+  dpShown = !dpShown;
+  const panel = document.getElementById('dp-panel');
+  if (dpShown) {
+    panel.className = 'bg-gray-800 rounded-2xl p-5 mb-4';
+    renderDPTable();
+  } else {
+    panel.className = 'hidden bg-gray-800 rounded-2xl p-5 mb-4';
+  }
+}
+
+function renderDPTable() {
+  const p = PUZZLES[currentIdx];
+  const { dp, ptr } = needlemanWunsch(p.s1, p.s2);
+  const s1 = p.s1, s2 = p.s2;
+  const n = s1.length, m = s2.length;
+
+  // Mark path cells
+  const path = new Set();
+  let i=n, j=m;
+  while (i>0||j>0) {
+    path.add(`${i},${j}`);
+    if (i>0&&j>0&&ptr[i][j]==='D'){i--;j--;}
+    else if (i>0&&ptr[i][j]==='U'){i--;}
+    else{j--;}
+  }
+  path.add('0,0');
+
+  let html = '<table class="border-collapse text-xs">';
+  html += '<tr><td class="dp-cell"></td><td class="dp-cell text-gray-500">—</td>';
+  for (let j=0;j<m;j++) html += `<td class="dp-cell text-blue-400">${s2[j]}</td>`;
+  html += '</tr>';
+  for (let i=0;i<=n;i++) {
+    html += '<tr>';
+    html += `<td class="dp-cell text-blue-400">${i===0?'—':s1[i-1]}</td>`;
+    for (let j=0;j<=m;j++) {
+      const inPath = path.has(`${i},${j}`);
+      html += `<td class="dp-cell ${inPath?'dp-cell-path':''}" title="${ptr[i][j]||'start'}">${dp[i][j]}</td>`;
+    }
+    html += '</tr>';
+  }
+  html += '</table>';
+  document.getElementById('dp-table').innerHTML = html;
+}
+
+function showFeedback(type, msg) {
+  const el = document.getElementById('feedback');
+  const colors = { success:'bg-green-900 border border-green-600 text-green-200', error:'bg-red-900 border border-red-600 text-red-200', warning:'bg-yellow-900 border border-yellow-600 text-yellow-200', hint:'bg-blue-900 border border-blue-600 text-blue-200' };
+  el.className = `rounded-2xl p-4 mb-4 ${colors[type]}`;
+  el.textContent = msg;
+}
+
+loadStats();
+setPuzzle(currentIdx);
+</script>
+</body>
+</html>
